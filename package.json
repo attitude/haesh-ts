@@ -1,0 +1,44 @@
+{
+	"name": "haesh",
+	"version": "0.0.1",
+	"description": "Create stable object references",
+	"type": "module",
+	"main": "./dist/index.cjs",
+	"module": "./dist/index.mjs",
+	"exports": {
+		".": {
+			"require": "./dist/index.cjs",
+			"import": "./dist/index.mjs",
+			"types": "./dist/index.d.ts",
+			"typescript": "./src/index.ts"
+		}
+	},
+	"types": "./dist/index.d.ts",
+	"typings": "./dist/index.d.ts",
+	"files": [
+		"dist",
+		"src"
+	],
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/attitude/haesh-ts.git"
+	},
+	"scripts": {
+		"dist": "tsup",
+		"dev": "cd web && bun dev",
+		"docs": "cd web && bun docs",
+		"test": "bun test",
+		"test:watch": "bun test --watch"
+	},
+	"devDependencies": {
+		"@types/bun": "latest",
+		"tsup": "^8.3.6",
+		"type-fest": "^4.35.0"
+	},
+	"peerDependencies": {
+		"typescript": "^5"
+	},
+	"workspaces": [
+		"web"
+	]
+}

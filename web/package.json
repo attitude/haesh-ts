@@ -1,0 +1,22 @@
+{
+	"name": "haesh-docs",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"main": "src/index.tsx",
+	"module": "src/index.tsx",
+	"scripts": {
+		"dev": "bun --hot ./public/index.tsx",
+		"docs": "bun build ./public/index.html --outdir=../docs --sourcemap --target=browser --minify --define:process.env.NODE_ENV='\"production\"' --env='BUN_PUBLIC_*'",
+		"start": "NODE_ENV=production bun public/index.tsx"
+	},
+	"dependencies": {
+		"react": "^19",
+		"react-dom": "^19"
+	},
+	"devDependencies": {
+		"@types/react": "^19",
+		"@types/react-dom": "^19",
+		"@types/bun": "latest"
+	}
+}
