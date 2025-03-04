@@ -12,7 +12,7 @@ or provide second `maxAge` argument to `æ`.
 
 > [!IMPORTANT]
 >
-> **Average slowdown**: I tested with Bun and creating and matching references is around 6-7x slower than JUST creating the object. Yet still, we are still talking microseconds. The stability can save on re-renders of your app way more than that. Do your math and choose wisely.
+> **Average slowdown**: I tested with Bun and creating and matching references is around 5-6x slower than JUST creating the object. Yet still, we are still talking microseconds. The stability can save on re-renders of your app way more than that. Do your math and choose wisely.
 
 ## Usage
 
@@ -23,11 +23,13 @@ import { createHaesh } from "haesh";
 import { useEffect } from "react";
 
 // Create a instance reusable thorough the app:
-export const [æ, æDestruct] = createHaesh();
+export const [æ, destroy] = createHaesh();
 
 export function App(props) {
 	// In case the App unmounts, free memory:
-	useEffect(() => () => destroy(), []);
+	useEffect(() => {
+		return destroy;
+	}, []);
 
 	return (
 		<Theme.Provider value={æ({ color: "red" })}>/* your app */</Theme.Provider>
@@ -35,18 +37,20 @@ export function App(props) {
 }
 ```
 
-Or in the create as many local contexts as you like:
+Or create as many local contexts as you like:
 
 ```typescript
 import { createHaesh } from "haesh";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 export function View(props) {
 	// Create a local instance:
 	const [æ, destroy] = useMemo(() => createHaesh(), []);
 
 	// Free the memory after component umount:
-	useEffect(() => () => destroy, []);
+	useEffect(() => {
+		return destroy;
+	}, [destroy]);
 
 	return (
 		<div
@@ -57,6 +61,36 @@ export function View(props) {
 }
 ```
 
+## API
+
+### `createHaesh(options?)`
+
+Creates a new haesh instance.
+
+```typescript
+const [æ, destroy] = createHaesh({
+	// Makes nested objects throw an error unless they are already hashed
+	strict: true, // default: true
+	// Time in ms between garbage collection runs
+	garbageCollectionInterval: 1000, // default: 1000
+	// Optional reference to the internal state
+	ref: (state) => {
+		/* ... */
+	},
+});
+```
+
+### `æ(value, maxAge?)`
+
+Hashes a value and returns a frozen reference.
+
+- `value`: An object or array to hash
+- `maxAge`: Optional time in milliseconds after which the reference will be garbage collected (default: `Infinity`)
+
+### `destroy()`
+
+Destroys the haesh instance and frees up memory. This can be used directly as a cleanup function in React's useEffect.
+
 ---
 
 ## A React Hook
@@ -66,10 +100,10 @@ import { createHaesh } from "haesh";
 import { useEffect, useMemo } from "react";
 
 export function useHaesh() {
-	const [haesh, destruct] = useMemo(() => createHaesh(), []);
+	const [haesh, destroy] = useMemo(() => createHaesh(), []);
 
 	// Free the memory after component umount:
-	useEffect(() => () => destruct(), [destruct]);
+	useEffect(() => destroy, [destroy]);
 
 	return haesh;
 }

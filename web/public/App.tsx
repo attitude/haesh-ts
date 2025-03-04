@@ -1,8 +1,26 @@
 import { CSSProperties, memo, useEffect, useState } from "react";
 import "./index.css";
-import { createHaesh } from "@/index";
+import { createHaesh, State } from "@/index";
 
-const [æ, æDestruct] = createHaesh();
+const ref: { current: State | null } = { current: null };
+
+const [æ, æDestruct] = createHaesh({
+	ref: (state) => {
+		ref.current = state;
+	},
+});
+
+function debug(): Record<string, unknown> {
+	const state = ref.current;
+
+	return {
+		"Reference keys count": state?.referenceKey_object_Map.size,
+		"Reference keys": state
+			? [...state.referenceKey_object_Map.keys()].join(", ")
+			: undefined,
+		"GC: queue size": state?.referenceKey_queue_Map.size,
+	};
+}
 
 const styles: Record<string, CSSProperties> = {
 	noMargins: { margin: 0 },
@@ -30,6 +48,8 @@ export function App() {
 	}, []);
 
 	useEffect(() => () => æDestruct(), []);
+
+	// console.log("Current", debug());
 
 	return (
 		<Screen style={æ({ ...styles.stack, ...styles.gap })}>
@@ -70,7 +90,7 @@ export function App() {
 						minute: new Date(time).getMinutes(),
 						second: new Date(time).getSeconds(),
 					},
-					1000
+					1500
 				)}
 			/>
 

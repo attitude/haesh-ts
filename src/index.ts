@@ -1,285 +1,317 @@
 import type { ReadonlyDeep } from "type-fest";
 
-function sortArrayMap<T, R>(array: T[], transform: (value: T) => R): R[] {
-	if (array.length <= 1) {
-		return array.map(transform);
-	} else {
-		const sorted = array.slice().sort();
-		const result: R[] = new Array(sorted.length);
+// Cache commonly used values
+const EMPTY_STRING = "";
+const NULL_HASH = "n";
+const TRUE_HASH = "t";
+const FALSE_HASH = "f";
+const DEFAULT_TIMEOUT = 1000;
 
-		for (let i = 0, len = sorted.length; i < len; i++) {
-			result[i] = transform(sorted[i]);
-		}
-
-		return result;
-	}
-}
-
-function sortObjectEntriesMap<T = any, R = any>(
-	object: { [key: string]: T },
-	transform: (entry: [string, T]) => R
-): R[] {
-	const keys = Object.keys(object);
-
-	if (keys.length <= 1) {
-		return keys.map((k) => transform([k, object[k]]));
-	} else {
-		keys.sort(); // Sort keys in place
-		const results: R[] = new Array(keys.length);
-
-		for (let i = 0, len = keys.length; i < len; i++) {
-			const key = keys[i];
-			results[i] = transform([key, object[key]]);
-		}
-
-		return results;
-	}
-}
-
-function getConstructorName(value: object): string {
-	return (value as any).constructor?.name ?? "Unknown";
-}
-
-interface CreateOptions {
+export interface CreateOptions {
+	ref?: (value: State) => void;
 	strict?: boolean;
 }
 
+export interface State {
+	stringHash_Map: Map<string, string>;
+	functionHash_Map: Map<string, string>;
+	referenceKey_object_Map: Map<string, object>;
+	referenceKey_queue_Map: Map<string, number>;
+	object_referenceKey_Map: WeakMap<object, string>;
+}
+
+function hashOfNumber(value: number): string {
+	return `n${value}`;
+}
+
+function hashOfBoolean(value: boolean): string {
+	return value ? TRUE_HASH : FALSE_HASH;
+}
+
+function hashOfUndefined(): string {
+	return EMPTY_STRING;
+}
+
+function hashOfNull(): string {
+	return NULL_HASH;
+}
+
+function hashOfBigint(value: bigint): string {
+	return `B${value}`;
+}
+
+const IDLE_CALLBACK_IS_SUPPORTED = typeof requestIdleCallback === "function";
+
 export function createHaesh(options: CreateOptions = {}) {
-	let index = 0;
-	let idleId: number | null = null;
-	let timeoutId: Timer | null = null; // Fallback for environments without requestIdleCallback
+	const ref = options.ref;
+	const strict = options.strict ?? true;
 
-	const strict = options.strict ?? false;
+	const state: State = {
+		stringHash_Map: new Map(),
+		functionHash_Map: new Map(),
+		referenceKey_object_Map: new Map(),
+		referenceKey_queue_Map: new Map(),
+		object_referenceKey_Map: new WeakMap(),
+	};
 
-	let object_referenceKey_Map = new WeakMap<object, string>();
-	const objectSum_referenceKey_Map = new Map<string, string>();
-	const referenceKey_object_Map = new Map<string, object>();
-	const referenceKey_queue_Map = new Map<string, number>();
+	if (ref) {
+		ref(state);
+	}
 
-	function collectGarbage() {
+	function hashOfString(value: string): string {
+		const hash = state.stringHash_Map.get(value);
+
+		if (hash) {
+			return hash;
+		} else {
+			const hash = `s${state.stringHash_Map.size}`;
+			state.stringHash_Map.set(value, hash);
+
+			return hash;
+		}
+	}
+
+	function hashOfFunction(value: Function): string {
+		const content = value.toString();
+		const hash = state.functionHash_Map.get(content);
+
+		if (hash) {
+			return hash;
+		} else {
+			const hash = `"f${state.functionHash_Map.size}"`;
+			state.functionHash_Map.set(content, hash);
+
+			return hash;
+		}
+	}
+
+	function setReferenceKeyMaxAge(referenceKey: string, maxAge: number): void {
+		if (maxAge === Infinity) {
+			state.referenceKey_queue_Map.delete(referenceKey);
+		} else {
+			state.referenceKey_queue_Map.set(referenceKey, Date.now() + maxAge);
+		}
+	}
+
+	let gcTimeout: Timer | null = null;
+	let gcIdleId: number | null = null;
+
+	function collectGarbage(): void {
 		const now = Date.now();
-		const keysToDelete: string[] = []; // Batch deletions to avoid potential issues during iteration
-		referenceKey_queue_Map.forEach((diedAt, referenceKey) => {
+		const keysToDelete: string[] = [];
+
+		for (const [referenceKey, diedAt] of state.referenceKey_queue_Map) {
 			if (diedAt < now) {
 				keysToDelete.push(referenceKey);
 			}
-		});
-		keysToDelete.forEach((referenceKey) => {
-			referenceKey_object_Map.delete(referenceKey);
-			referenceKey_queue_Map.delete(referenceKey);
-		});
-	}
+		}
 
-	function scheduledGarbageCollection() {
-		if (typeof requestIdleCallback === "function") {
-			if (idleId !== null) {
-				cancelIdleCallback(idleId);
-				idleId = null; // Reset idleId
-			}
-			idleId = requestIdleCallback(collectGarbage, { timeout: 1000 });
-		} else {
-			if (timeoutId !== null) {
-				clearTimeout(timeoutId);
-				timeoutId = null;
-			}
-			timeoutId = setTimeout(collectGarbage, 1000); // Fallback using setTimeout
+		for (const key of keysToDelete) {
+			state.referenceKey_object_Map.delete(key);
+			state.referenceKey_queue_Map.delete(key);
+		}
+
+		if (gcIdleId) {
+			cancelIdleCallback(gcIdleId);
+			gcIdleId = null;
+		}
+
+		if (gcTimeout) {
+			clearTimeout(gcTimeout);
+			gcTimeout = null;
 		}
 	}
 
-	function setReferenceKeyMaxAge(referenceKey: string, maxAge: number) {
-		if (maxAge === Infinity) {
-			referenceKey_queue_Map.delete(referenceKey);
+	function scheduleNextGC(): void {
+		if (IDLE_CALLBACK_IS_SUPPORTED) {
+			if (!gcIdleId) {
+				gcIdleId = requestIdleCallback(collectGarbage, {
+					timeout: DEFAULT_TIMEOUT,
+				});
+			}
 		} else {
-			referenceKey_queue_Map.set(referenceKey, Date.now() + maxAge);
+			if (!gcTimeout) {
+				gcTimeout = setTimeout(collectGarbage, DEFAULT_TIMEOUT);
+			}
 		}
 	}
 
-	function objectReferenceKey(
-		value: object,
-		maxAge: number,
-		depth: number
-	): string {
-		const cachedKey = object_referenceKey_Map.get(value);
+	function getValueType(value: any): string {
+		if (value === null) return "null";
+		if (value === undefined) return "undefined";
+		return typeof value;
+	}
 
+	function haesh<
+		T extends
+			| null
+			| undefined
+			| ObjectValue
+			| ArrayValue
+			| ReadonlyDeep<ObjectValue>
+			| ReadonlyDeep<ArrayValue>
+	>(value: T, maxAge: number = Infinity): ReadonlyDeep<T> {
+		if (value == null) return value as ReadonlyDeep<T>;
+
+		if (!value || typeof value !== "object") {
+			throw new TypeError(
+				`Value must be an object or an array, got ${getValueType(value)}`
+			);
+		}
+
+		if (maxAge !== Infinity) {
+			scheduleNextGC();
+		}
+
+		const cachedKey = state.object_referenceKey_Map.get(value);
 		if (cachedKey) {
 			setReferenceKeyMaxAge(cachedKey, maxAge);
+			return value as ReadonlyDeep<T>;
+		}
 
-			return cachedKey;
+		if (Array.isArray(value)) {
+			return hashArray(value, maxAge) as ReadonlyDeep<T>;
 		} else {
-			let sum: string;
-			let clone: any;
-
-			if (Array.isArray(value)) {
-				clone = [];
-				const refKeys = sortArrayMap(value, (item) => {
-					const refKey = referenceKeyOf(item, maxAge, depth + 1);
-					// Use the cached frozen version if available.
-					clone.push(referenceKey_object_Map.get(refKey) ?? item);
-
-					return refKey;
-				});
-				sum = `[${refKeys.join(",")}]`;
-			} else {
-				clone = {};
-				const entries = sortObjectEntriesMap(value, ([itemKey, itemValue]) => {
-					const refKey = referenceKeyOf(itemValue, maxAge, depth + 1);
-					clone[itemKey] = referenceKey_object_Map.get(refKey) ?? itemValue;
-
-					return `${itemKey}:${refKey}`;
-				});
-				sum = `{${entries.join(",")}}`;
-			}
-
-			const existingRefKey = objectSum_referenceKey_Map.get(sum);
-
-			if (existingRefKey) {
-				if (
-					strict &&
-					depth > 0 &&
-					referenceKey_object_Map.get(existingRefKey) !== value
-				) {
-					throw new Error(
-						`[Strict Mode] Must be an already stored reference, got a new ${JSON.stringify(
-							value
-						)}`
-					);
-				}
-				setReferenceKeyMaxAge(existingRefKey, maxAge);
-
-				return existingRefKey;
-			} else {
-				if (strict && depth > 0) {
-					throw new Error(
-						`[Strict Mode] Must be an already stored reference, got a new ${JSON.stringify(
-							value
-						)}`
-					);
-				}
-				const newReferenceKey = `#${index++}`;
-				setReferenceKeyMaxAge(newReferenceKey, maxAge);
-				object_referenceKey_Map.set(value, newReferenceKey);
-				objectSum_referenceKey_Map.set(sum, newReferenceKey);
-				referenceKey_object_Map.set(newReferenceKey, Object.freeze(clone));
-
-				return newReferenceKey;
-			}
+			return hashObject(value as ObjectValue, maxAge) as ReadonlyDeep<T>;
 		}
 	}
 
-	function referenceKeyOfObject(
-		value: object,
-		maxAge: number,
-		depth: number
-	): string {
-		if (value === null) {
-			return "null";
-		} else {
-			const constructorName = getConstructorName(value);
-
-			if (
-				constructorName === "Object" ||
-				(Array.isArray(value) && constructorName === "Array")
-			) {
-				if (maxAge !== Infinity) {
-					scheduledGarbageCollection();
-				}
-
-				return objectReferenceKey(value, maxAge, depth);
-			} else {
-				throw new Error(`Not implemented typeof value: '${constructorName}'`);
-			}
-		}
-	}
-
-	function referenceKeyOf(
-		value: unknown,
-		maxAge: number,
-		depth: number
-	): string {
-		switch (typeof value) {
-			case "string":
-			case "number":
-			case "bigint":
-			case "boolean":
-			case "undefined":
-				return JSON.stringify(value);
-			case "object":
-				if (value === null) {
-					return "null";
-				} else {
-					const constructorName = getConstructorName(value);
-
-					if (
-						constructorName === "Object" ||
-						(Array.isArray(value) && constructorName === "Array")
-					) {
-						if (maxAge !== Infinity) {
-							scheduledGarbageCollection();
-						}
-
-						return objectReferenceKey(value, maxAge, depth);
-					} else {
-						throw new Error(
-							`Not implemented typeof value: '${constructorName}'`
-						);
-					}
-				}
-			case "symbol":
-				throw new Error(
-					`Not implemented Symbol.keyFor('${Symbol.keyFor(value)}')`
-				);
-			default:
-				throw new Error(`Not implemented typeof value: '${typeof value}'`);
-		}
-	}
-
-	function destruct() {
-		object_referenceKey_Map = new WeakMap();
-		objectSum_referenceKey_Map.clear();
-		referenceKey_object_Map.clear();
-		referenceKey_queue_Map.clear();
-	}
-
-	function haesh<const T extends Value | ReadonlyDeep<Value>>(
+	function hashArray<T extends ArrayValue>(
 		value: T,
-		maxAge: number = Infinity
-	): ReadonlyDeep<T> {
-		switch (typeof value) {
-			case "string":
-			case "number":
-			case "bigint":
-			case "boolean":
-			case "undefined":
-				return value as ReadonlyDeep<T>;
-			case "object":
-				if (value === null) {
-					return value as ReadonlyDeep<T>;
-				} else {
-					const refKey = referenceKeyOfObject(value, maxAge, 0);
-					const reference = referenceKey_object_Map.get(refKey);
+		maxAge: number
+	): Readonly<T> {
+		const length = value.length;
+		const sum = new Array(length);
+		const copy = new Array(length);
 
-					if (reference) {
-						return reference as ReadonlyDeep<T>;
-					} else {
-						throw new Error("Reference is missing in memory");
-					}
-				}
-			case "symbol":
-				throw new Error(
-					`Not implemented Symbol.keyFor('${Symbol.keyFor(value)}')`
-				);
+		for (let i = 0; i < length; i++) {
+			const item = value[i];
+			const type = getValueType(item);
+
+			copy[i] = item;
+			sum[i] = hashValue(item, type);
+		}
+
+		if (sum.length > 1) {
+			sum.sort();
+		}
+
+		const key = `[${sum.join(",")}]`;
+		return finalizeHash(key, copy, maxAge) as T;
+	}
+
+	function hashObject<T extends ObjectValue>(
+		value: T,
+		maxAge: number
+	): Readonly<T> {
+		const copy = {} as ObjectValue;
+		const keys = Object.keys(value);
+		const length = keys.length;
+
+		if (length > 1) {
+			keys.sort();
+		}
+
+		const sum = new Array(length);
+		for (let i = 0; i < length; i++) {
+			const key = keys[i];
+			const item = value[key];
+			const type = getValueType(item);
+
+			copy[key] = item;
+			sum[i] = `${key}:${hashValue(item, type)}`;
+		}
+
+		const key = `{${sum.join(",")}}`;
+		return finalizeHash(key, copy, maxAge) as T;
+	}
+
+	function hashValue(item: any, type: string): string {
+		switch (type) {
+			case "string":
+				return hashOfString(item);
+			case "number":
+				return hashOfNumber(item);
+			case "boolean":
+				return hashOfBoolean(item);
+			case "undefined":
+				return hashOfUndefined();
+			case "bigint":
+				return hashOfBigint(item);
+			case "function":
+				return hashOfFunction(item);
+			case "object":
+			case "null":
+				if (item === null) return hashOfNull();
+				return hashReference(item);
 			default:
-				throw new Error(`Not implemented typeof value: '${typeof value}'`);
+				throw new Error(`Not implemented typeof item: '${type}'`);
 		}
 	}
 
-	return [haesh, destruct] as const;
+	function recover(value: ObjectValue | ArrayValue, maxAge: number = Infinity) {
+		return haesh(value, maxAge);
+	}
+
+	// Handle object references
+	function hashReference(item: object): string {
+		const cachedKey = state.object_referenceKey_Map.get(item);
+
+		if (!cachedKey && !strict) {
+			const newItem = recover(item as ObjectValue | ArrayValue);
+			const newCachedKey = state.object_referenceKey_Map.get(newItem);
+
+			if (!newCachedKey) {
+				throw new Error("Reference is missing in memory");
+			}
+
+			return newCachedKey;
+		}
+
+		if (!cachedKey) {
+			throw new Error("Reference is missing in memory");
+		}
+
+		return cachedKey;
+	}
+
+	// Finalize hash creation and storage
+	function finalizeHash<T>(key: string, value: T, maxAge: number): Readonly<T> {
+		setReferenceKeyMaxAge(key, maxAge);
+
+		const existing = state.referenceKey_object_Map.get(key) as T;
+		if (existing) return existing;
+
+		const frozen = Object.freeze(value);
+		state.referenceKey_object_Map.set(key, frozen);
+		state.object_referenceKey_Map.set(frozen, key);
+
+		return frozen;
+	}
+
+	function destroy() {
+		if (IDLE_CALLBACK_IS_SUPPORTED && gcIdleId) {
+			cancelIdleCallback(gcIdleId);
+		}
+
+		if (gcTimeout) {
+			clearTimeout(gcTimeout);
+		}
+
+		gcIdleId = null;
+		gcTimeout = null;
+
+		state.stringHash_Map.clear();
+		state.functionHash_Map.clear();
+		state.referenceKey_object_Map.clear();
+		state.referenceKey_queue_Map.clear();
+		state.object_referenceKey_Map = new WeakMap();
+	}
+
+	return [haesh, destroy] as const;
 }
 
-export type Primitive = string | number | boolean | null | undefined;
-
+export type Primitive = Function | string | number | boolean | null | undefined;
 export type ObjectValue = { [Key in PropertyKey]: Value };
-
-export type ArrayValue = Value[];
-
+export type ArrayValue = Array<Value>;
 export type Value = Primitive | ObjectValue | ArrayValue;

@@ -13,7 +13,7 @@ export default defineConfig((options) => ({
 
 		return format === "esm"
 			? { js: minPrefix + ".mjs" }
-			: { js: minPrefix + ".cjs" };
+			: { js: minPrefix + ".cjs", dts: ".d.cts" };
 	},
 	outDir: `dist`,
 }));

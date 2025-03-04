@@ -192,7 +192,9 @@ const rounds: Array<{
 		],
 	},
 ];
-const [æ] = createHaesh();
+const [æ] = createHaesh({
+	strict: false,
+});
 
 const REPEAT = 1_000_000;
 

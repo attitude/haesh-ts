@@ -4,15 +4,8 @@ import { createHaesh } from "../src";
 test("primitives", () => {
 	const [æ] = createHaesh();
 
-	expect(æ(1)).toBe(æ(1));
-	expect(æ(1)).not.toBe(æ(2));
-	expect(æ("a")).toBe(æ("a"));
-	expect(æ("a")).not.toBe(æ("b"));
-	expect(æ(true)).toBe(æ(true));
-	expect(æ(true)).not.toBe(æ(false));
 	expect(æ(null)).toBe(æ(null));
 	expect(æ(null)).not.toBe(æ(undefined));
-	expect(æ(undefined)).toBe(æ(undefined));
 	expect(æ(undefined)).not.toBe(æ(null));
 });
 
@@ -26,7 +19,9 @@ test("simple", () => {
 });
 
 test("nested", () => {
-	const [æ] = createHaesh();
+	const [æ] = createHaesh({
+		strict: false,
+	});
 
 	expect(æ({ a: { b: 1 } })).toBe(æ({ a: { b: 1 } }));
 	expect(æ({ a: { b: 1 } })).not.toBe(æ({ a: { b: 2 } }));
@@ -43,7 +38,9 @@ test("nested", () => {
 });
 
 test("deeply nested objects with arrays", () => {
-	const [æ] = createHaesh();
+	const [æ] = createHaesh({
+		strict: false,
+	});
 
 	expect(æ({ a: { b: [1, 2, 3] } })).toBe(æ({ a: { b: [1, 2, 3] } }));
 	expect(æ({ a: { b: [1, 2, 3] } })).not.toBe(æ({ a: { b: [1, 2, 4] } }));
@@ -53,7 +50,7 @@ test("deeply nested objects with arrays", () => {
 });
 
 test("strict and deeply nested objects with arrays and objects", () => {
-	const [æ] = createHaesh({ strict: true });
+	const [æ] = createHaesh();
 
 	expect(() => æ({ a: { b: [1, 2, 3] } })).toThrow();
 	expect(() => æ([3, 2, 1])).not.toThrow();
